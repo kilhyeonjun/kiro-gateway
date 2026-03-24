@@ -325,7 +325,7 @@ def get_truncation_recovery_system_addition() -> str:
     )
 
 
-def inject_thinking_tags(content: str) -> str:
+def inject_thinking_tags(content: str, max_tokens: Optional[int] = None) -> str:
     """
     Inject fake reasoning tags into content.
     
@@ -335,12 +335,16 @@ def inject_thinking_tags(content: str) -> str:
     
     Args:
         content: Original content string
+        max_tokens: Override for max thinking tokens (from client request).
+                    If None, uses FAKE_REASONING_MAX_TOKENS from config.
     
     Returns:
         Content with thinking tags prepended (if enabled) or original content
     """
     if not FAKE_REASONING_ENABLED:
         return content
+    
+    effective_max_tokens = max_tokens if max_tokens is not None else FAKE_REASONING_MAX_TOKENS
     
     # Thinking instruction to improve reasoning quality
     thinking_instruction = (
@@ -357,11 +361,11 @@ def inject_thinking_tags(content: str) -> str:
     
     thinking_prefix = (
         f"<thinking_mode>enabled</thinking_mode>\n"
-        f"<max_thinking_length>{FAKE_REASONING_MAX_TOKENS}</max_thinking_length>\n"
+        f"<max_thinking_length>{effective_max_tokens}</max_thinking_length>\n"
         f"<thinking_instruction>{thinking_instruction}</thinking_instruction>\n\n"
     )
     
-    logger.debug(f"Injecting fake reasoning tags with max_tokens={FAKE_REASONING_MAX_TOKENS}")
+    logger.debug(f"Injecting fake reasoning tags with max_tokens={effective_max_tokens}")
     
     return thinking_prefix + content
 
@@ -1344,7 +1348,8 @@ def build_kiro_payload(
     tools: Optional[List[UnifiedTool]],
     conversation_id: str,
     profile_arn: str,
-    inject_thinking: bool = True
+    inject_thinking: bool = True,
+    thinking_budget: Optional[int] = None
 ) -> KiroPayloadResult:
     """
     Builds complete payload for Kiro API from unified data.
@@ -1483,7 +1488,7 @@ def build_kiro_payload(
     
     # Inject thinking tags if enabled (only for the current/last user message)
     if inject_thinking and current_message.role == "user":
-        current_content = inject_thinking_tags(current_content)
+        current_content = inject_thinking_tags(current_content, max_tokens=thinking_budget)
     
     # Build userInputMessage
     user_input_message = {

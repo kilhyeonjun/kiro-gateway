@@ -164,6 +164,9 @@ class ChatCompletionRequest(BaseModel):
     presence_penalty: Optional[float] = None
     frequency_penalty: Optional[float] = None
     
+    # Extended thinking (OpenAI-compatible)
+    thinking: Optional[Dict[str, Any]] = None
+    
     # Tools (function calling)
     tools: Optional[List[Tool]] = None
     tool_choice: Optional[Union[str, Dict]] = None

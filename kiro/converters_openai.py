@@ -334,6 +334,13 @@ def build_kiro_payload(
         f"system_prompt_length={len(system_prompt)}"
     )
     
+    # Extract thinking budget from request if provided
+    thinking_budget = None
+    if request_data.thinking and isinstance(request_data.thinking, dict):
+        thinking_budget = request_data.thinking.get("budget_tokens")
+        if thinking_budget:
+            logger.debug(f"Client requested thinking budget: {thinking_budget}")
+    
     # Use core function to build payload
     result = core_build_kiro_payload(
         messages=unified_messages,
@@ -342,7 +349,8 @@ def build_kiro_payload(
         tools=unified_tools,
         conversation_id=conversation_id,
         profile_arn=profile_arn,
-        inject_thinking=True
+        inject_thinking=True,
+        thinking_budget=thinking_budget
     )
     
     return result.payload
