@@ -313,6 +313,7 @@ class TestStreamKiroToOpenai:
         
         async def mock_parse_kiro_stream(*args, **kwargs):
             yield KiroEvent(type="content", content="Hello")
+            yield KiroEvent(type="usage", usage={"inputTokenCount": 10, "outputTokenCount": 1})
         
         print("Action: Streaming to OpenAI format...")
         chunks = []
