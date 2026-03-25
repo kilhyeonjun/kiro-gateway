@@ -360,6 +360,7 @@ class TestStreamKiroToAnthropic:
         
         async def mock_parse_kiro_stream(*args, **kwargs):
             yield KiroEvent(type="content", content="Hello")
+            yield KiroEvent(type="context_usage", context_usage_percentage=5.0)
         
         print("Action: Streaming to Anthropic format...")
         events = []
