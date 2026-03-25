@@ -3576,7 +3576,8 @@ class TestInjectThinkingTags:
         print("Action: Inject thinking tags with FAKE_REASONING_MAX_TOKENS=16000...")
         with patch('kiro.converters_core.FAKE_REASONING_ENABLED', True):
             with patch('kiro.converters_core.FAKE_REASONING_MAX_TOKENS', 16000):
-                result = inject_thinking_tags(content)
+                with patch('kiro.converters_core.FAKE_REASONING_BUDGET_CAP', 0):
+                    result = inject_thinking_tags(content)
         
         print(f"Result: {result[:300]}...")
         print("Checking that max_thinking_length uses configured value...")
