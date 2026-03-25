@@ -220,7 +220,12 @@ async def stream_kiro_to_openai_internal(
             )
         
         # Determine finish_reason
-        finish_reason = "tool_calls" if all_tool_calls else "stop"
+        if all_tool_calls:
+            finish_reason = "tool_calls"
+        elif content_was_truncated:
+            finish_reason = "length"
+        else:
+            finish_reason = "stop"
         
         # Count completion_tokens (output) using tiktoken
         completion_tokens = count_tokens(full_content + full_thinking_content)
