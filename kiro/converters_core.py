@@ -40,6 +40,7 @@ from kiro.config import (
     TOOL_DESCRIPTION_MAX_LENGTH,
     FAKE_REASONING_ENABLED,
     FAKE_REASONING_MAX_TOKENS,
+    FAKE_REASONING_BUDGET_CAP,
 )
 
 
@@ -345,6 +346,10 @@ def inject_thinking_tags(content: str, max_tokens: Optional[int] = None) -> str:
         return content
     
     effective_max_tokens = max_tokens if max_tokens is not None else FAKE_REASONING_MAX_TOKENS
+    # Cap client budget to prevent fake reasoning from consuming all output tokens
+    if FAKE_REASONING_BUDGET_CAP > 0 and effective_max_tokens > FAKE_REASONING_BUDGET_CAP:
+        logger.debug(f"Capping fake reasoning budget from {effective_max_tokens} to {FAKE_REASONING_BUDGET_CAP}")
+        effective_max_tokens = FAKE_REASONING_BUDGET_CAP
     
     # Thinking instruction to improve reasoning quality
     thinking_instruction = (

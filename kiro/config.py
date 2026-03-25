@@ -416,6 +416,13 @@ FAKE_REASONING_ENABLED: bool = _FAKE_REASONING_RAW not in ("false", "0", "no", "
 # Default: 4000 tokens
 FAKE_REASONING_MAX_TOKENS: int = int(os.getenv("FAKE_REASONING_MAX_TOKENS", "4000"))
 
+# Maximum budget cap for fake reasoning when client sends thinking.budget_tokens.
+# Fake reasoning uses output tokens (not separate thinking tokens), so large budgets
+# can cause the model to spend all output tokens on reasoning with nothing left for actual content.
+# This caps the client's budget_tokens to prevent that. Set to 0 to disable capping.
+# Default: 10000 tokens
+FAKE_REASONING_BUDGET_CAP: int = int(os.getenv("FAKE_REASONING_BUDGET_CAP", "10000"))
+
 # How to handle the thinking block in responses:
 # - "as_reasoning_content": Extract to reasoning_content field (OpenAI-compatible, recommended)
 # - "remove": Remove thinking block completely, return only final answer
