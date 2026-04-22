@@ -29,3 +29,11 @@ requests/
 .pytest_cache/
 .coverage
 htmlcov/
+
+# Local-only Docker/dev files
+Dockerfile.local
+docker-compose.local.yml
+.sisyphus/
+
+# macOS noise
+.DS_Store
