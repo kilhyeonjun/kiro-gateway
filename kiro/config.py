@@ -297,7 +297,8 @@ FALLBACK_MODELS: List[Dict[str, str]] = [
 MODEL_CACHE_TTL: int = 3600
 
 # Default maximum number of input tokens
-DEFAULT_MAX_INPUT_TOKENS: int = 200000
+# Override via env var to support 1M context window (Kiro Pro+ tiers)
+DEFAULT_MAX_INPUT_TOKENS: int = int(os.getenv("DEFAULT_MAX_INPUT_TOKENS", "1000000"))
 
 # ==================================================================================================
 # Tool Description Handling (Kiro API Limitations)
