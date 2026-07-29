@@ -303,11 +303,13 @@ ACCOUNT_SYSTEM=true
 [
   {
     "type": "json",
-    "path": "~/.aws/sso/cache/kiro-auth-token.json"
+    "path": "~/.aws/sso/cache/kiro-auth-token.json",
+    "priority": 0
   },
   {
     "type": "sqlite",
-    "path": "~/.local/share/kiro-cli/data.sqlite3"
+    "path": "~/.local/share/kiro-cli/data.sqlite3",
+    "priority": 100
   },
   {
     "type": "refresh_token",
@@ -316,6 +318,12 @@ ACCOUNT_SYSTEM=true
   }
 ]
 ```
+
+Lower `priority` values are tried first. When an account rejects a model with
+`INVALID_MODEL_ID`, the gateway remembers that account/model combination for
+the model-cache TTL and immediately tries the next eligible account. Quota,
+rate-limit, and authentication failures continue to use the account circuit
+breaker.
 
 **Folder with files:**
 ```json

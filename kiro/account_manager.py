@@ -154,13 +154,33 @@ class Account:
         stats: Usage statistics
     """
     id: str
+    priority: int = 0
     auth_manager: Optional[KiroAuthManager] = None
     model_cache: Optional[ModelInfoCache] = None
     model_resolver: Optional[ModelResolver] = None
     failures: int = 0
     last_failure_time: float = 0.0
     models_cached_at: float = 0.0
+    unsupported_models: Dict[str, float] = field(default_factory=dict)
     stats: AccountStats = field(default_factory=AccountStats)
+
+
+_MAX_UNSUPPORTED_MODELS_PER_ACCOUNT = 256
+
+
+def _prune_unsupported_models(account: Account, now: float) -> None:
+    """Drop expired model rejections and bound persisted client-controlled state."""
+    entries = account.unsupported_models if isinstance(account.unsupported_models, dict) else {}
+    fresh = [
+        (model, timestamp)
+        for model, timestamp in entries.items()
+        if isinstance(model, str)
+        and isinstance(timestamp, (int, float))
+        and now - timestamp < ACCOUNT_CACHE_TTL
+    ]
+    # ponytail: bounded O(n log n); replace with an LRU only if the cap grows materially.
+    fresh.sort(key=lambda item: item[1], reverse=True)
+    account.unsupported_models = dict(fresh[:_MAX_UNSUPPORTED_MODELS_PER_ACCOUNT])
 
 
 @dataclass
@@ -241,6 +261,12 @@ class AccountManager:
             
             if not enabled:
                 continue
+
+            try:
+                priority = int(entry.get("priority", 0))
+            except (TypeError, ValueError):
+                logger.warning("Invalid credential entry (priority must be an integer)")
+                continue
             
             # Validate required fields based on type
             if not cred_type:
@@ -263,7 +289,7 @@ class AccountManager:
                 token = entry.get('refresh_token', '')
                 token_hash = hashlib.sha256(token.encode()).hexdigest()[:16]
                 account_id = f"refresh_token_{token_hash}"
-                self._accounts[account_id] = Account(id=account_id)
+                self._accounts[account_id] = Account(id=account_id, priority=priority)
                 logger.debug(f"Added account: {account_id}")
                 continue  # Skip path processing for refresh_token
             
@@ -305,7 +331,7 @@ class AccountManager:
                             logger.warning(f"Invalid SQLite database file {file_path.name}: {e}")
                     
                     if is_valid:
-                        self._accounts[account_id] = Account(id=account_id)
+                        self._accounts[account_id] = Account(id=account_id, priority=priority)
                         logger.debug(f"Added account from folder: {account_id}")
                     else:
                         logger.warning(f"Skipping invalid credentials file: {file_path.name}")
@@ -318,7 +344,7 @@ class AccountManager:
                     account_id = f"refresh_token_{token_hash}"
                 else:
                     account_id = str(expanded_path.resolve())
-                self._accounts[account_id] = Account(id=account_id)
+                self._accounts[account_id] = Account(id=account_id, priority=priority)
                 logger.debug(f"Added account: {account_id}")
             else:
                 logger.warning(f"Credential path not found: {path}")
@@ -357,6 +383,8 @@ class AccountManager:
                     account.failures = data.get("failures", 0)
                     account.last_failure_time = data.get("last_failure_time", 0.0)
                     account.models_cached_at = data.get("models_cached_at", 0.0)
+                    account.unsupported_models = data.get("unsupported_models", {})
+                    _prune_unsupported_models(account, time.time())
                     
                     stats_data = data.get("stats", {})
                     account.stats = AccountStats(
@@ -376,6 +404,10 @@ class AccountManager:
         
         Uses tmp file + rename for atomic write.
         """
+        now = time.time()
+        for account in self._accounts.values():
+            _prune_unsupported_models(account, now)
+
         state_data = {
             "current_account_index": self._current_account_index,
             "accounts": {
@@ -383,6 +415,7 @@ class AccountManager:
                     "failures": account.failures,
                     "last_failure_time": account.last_failure_time,
                     "models_cached_at": account.models_cached_at,
+                    "unsupported_models": account.unsupported_models,
                     "stats": {
                         "total_requests": account.stats.total_requests,
                         "successful_requests": account.stats.successful_requests,
@@ -700,16 +733,28 @@ class AccountManager:
             # Multi-account logic: GLOBAL sticky
             normalized_model = normalize_model_name(model)
             
-            # ALWAYS start from GLOBAL index (one current account for ALL models)
-            start_index = self._current_account_index
+            # Lower priority values are tried first. Within the same priority,
+            # preserve the existing circular sticky order.
+            insertion_order = list(self._accounts)
+            start_index = self._current_account_index % len(insertion_order)
+            positions = {account_id: index for index, account_id in enumerate(insertion_order)}
+            all_account_ids = sorted(
+                insertion_order,
+                key=lambda account_id: (
+                    self._accounts[account_id].priority,
+                    (positions[account_id] - start_index) % len(insertion_order),
+                ),
+            )
             
-            # ALWAYS iterate over ALL accounts
-            all_account_ids = list(self._accounts.keys())
-            
-            for i in range(len(all_account_ids)):
-                current_index = (start_index + i) % len(all_account_ids)
-                account_id = all_account_ids[current_index]
+            for account_id in all_account_ids:
                 account = self._accounts[account_id]
+
+                rejected_at = account.unsupported_models.get(normalized_model)
+                if rejected_at is not None:
+                    if time.time() - rejected_at < ACCOUNT_CACHE_TTL:
+                        continue
+                    del account.unsupported_models[normalized_model]
+                    self._dirty = True
                 
                 # Skip accounts already tried in current failover loop
                 if exclude_accounts and account_id in exclude_accounts:
@@ -788,6 +833,8 @@ class AccountManager:
             # Dynamic learning: add model to mapping if successful
             # This allows system to learn about new models not in FALLBACK_MODELS
             normalized_model = normalize_model_name(model)
+            if account.unsupported_models.pop(normalized_model, None) is not None:
+                self._dirty = True
             if normalized_model not in self._model_to_accounts:
                 self._model_to_accounts[normalized_model] = ModelAccountList()
                 logger.debug(f"Dynamic learning: discovered new model '{normalized_model}'")
@@ -833,6 +880,9 @@ class AccountManager:
             # Account is healthy, model is just not available on this account
             # Log for user visibility but don't penalize account statistics
             if reason == "INVALID_MODEL_ID":
+                now = time.time()
+                account.unsupported_models[normalize_model_name(model)] = now
+                _prune_unsupported_models(account, now)
                 account.stats.total_requests += 1
                 self._dirty = True
                 logger.warning(

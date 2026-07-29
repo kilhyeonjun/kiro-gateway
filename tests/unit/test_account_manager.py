@@ -485,6 +485,33 @@ class TestAccountManagerLoadCredentials:
         
         assert len(manager._accounts) == 0
 
+    @pytest.mark.asyncio
+    async def test_load_credentials_preserves_priority(self, tmp_path):
+        creds_file = tmp_path / "credentials.json"
+        creds_file.write_text(json.dumps([
+            {"type": "refresh_token", "refresh_token": "paid", "priority": 100},
+            {"type": "refresh_token", "refresh_token": "free", "priority": 0},
+        ]))
+        manager = AccountManager(str(creds_file), str(tmp_path / "state.json"))
+
+        await manager.load_credentials()
+
+        assert sorted(account.priority for account in manager._accounts.values()) == [0, 100]
+
+    @pytest.mark.asyncio
+    async def test_invalid_priority_does_not_abort_other_accounts(self, tmp_path):
+        creds_file = tmp_path / "credentials.json"
+        creds_file.write_text(json.dumps([
+            {"type": "refresh_token", "refresh_token": "bad", "priority": "first"},
+            {"type": "refresh_token", "refresh_token": "good", "priority": 0},
+        ]))
+        manager = AccountManager(str(creds_file), str(tmp_path / "state.json"))
+
+        await manager.load_credentials()
+
+        assert len(manager._accounts) == 1
+        assert next(iter(manager._accounts.values())).priority == 0
+
 
 class TestAccountManagerLoadState:
     """
@@ -1103,6 +1130,146 @@ class TestAccountManagerReportFailure:
         # Assert
         print(f"Failures: {manager._accounts[account_id].failures}")
         assert manager._accounts[account_id].failures == 0  # Not incremented
+
+
+class TestAccountManagerModelFailover:
+    @pytest.mark.asyncio
+    async def test_invalid_model_skips_account_for_that_model(self, tmp_path):
+        manager = AccountManager(
+            credentials_file=str(tmp_path / "credentials.json"),
+            state_file=str(tmp_path / "state.json"),
+        )
+        manager._accounts = {
+            "limited": Account(id="limited", auth_manager=MagicMock()),
+            "capable": Account(id="capable", auth_manager=MagicMock()),
+        }
+
+        await manager.report_failure(
+            "limited", "claude-opus-4.7", ErrorType.RECOVERABLE, 400, "INVALID_MODEL_ID"
+        )
+
+        account = await manager.get_next_account("claude-opus-4.7")
+        assert account is not None
+        assert account.id == "capable"
+
+    @pytest.mark.asyncio
+    async def test_expired_model_rejection_is_retried(self, tmp_path):
+        manager = AccountManager(
+            credentials_file=str(tmp_path / "credentials.json"),
+            state_file=str(tmp_path / "state.json"),
+        )
+        manager._accounts = {
+            "free": Account(
+                id="free",
+                auth_manager=MagicMock(),
+                unsupported_models={"claude-sonnet-4.6": 0.0},
+            ),
+            "paid": Account(id="paid", auth_manager=MagicMock()),
+        }
+
+        account = await manager.get_next_account("claude-sonnet-4.6")
+        assert account is not None
+        assert account.id == "free"
+
+    @pytest.mark.asyncio
+    async def test_lower_priority_account_is_preferred(self, tmp_path):
+        manager = AccountManager(
+            credentials_file=str(tmp_path / "credentials.json"),
+            state_file=str(tmp_path / "state.json"),
+        )
+        manager._accounts = {
+            "paid": Account(id="paid", auth_manager=MagicMock(), priority=100),
+            "free": Account(id="free", auth_manager=MagicMock(), priority=0),
+        }
+
+        account = await manager.get_next_account("claude-sonnet-4.6")
+        assert account is not None
+        assert account.id == "free"
+
+    @pytest.mark.asyncio
+    async def test_equal_priority_preserves_sticky_account(self, tmp_path):
+        manager = AccountManager(
+            credentials_file=str(tmp_path / "credentials.json"),
+            state_file=str(tmp_path / "state.json"),
+        )
+        manager._accounts = {
+            "a": Account(id="a", auth_manager=MagicMock()),
+            "b": Account(id="b", auth_manager=MagicMock()),
+        }
+        await manager.report_success("b", "claude-sonnet-4.6")
+
+        account = await manager.get_next_account("claude-sonnet-4.6")
+
+        assert account is not None
+        assert account.id == "b"
+
+    @pytest.mark.asyncio
+    async def test_success_clears_model_rejection(self, tmp_path):
+        manager = AccountManager(
+            credentials_file=str(tmp_path / "credentials.json"),
+            state_file=str(tmp_path / "state.json"),
+        )
+        manager._accounts = {
+            "free": Account(
+                id="free",
+                auth_manager=MagicMock(),
+                unsupported_models={"claude-sonnet-4.6": time.time()},
+            )
+        }
+
+        await manager.report_success("free", "claude-sonnet-4.6")
+
+        assert "claude-sonnet-4.6" not in manager._accounts["free"].unsupported_models
+
+    @pytest.mark.asyncio
+    async def test_model_rejections_survive_restart(self, tmp_path):
+        state_file = tmp_path / "state.json"
+        rejected_at = time.time()
+        manager = AccountManager(str(tmp_path / "credentials.json"), str(state_file))
+        manager._accounts = {
+            "free": Account(
+                id="free",
+                unsupported_models={"claude-opus-4.7": rejected_at},
+            )
+        }
+        await manager._save_state()
+
+        restored = AccountManager(str(tmp_path / "credentials.json"), str(state_file))
+        restored._accounts = {"free": Account(id="free")}
+        await restored.load_state()
+
+        assert restored._accounts["free"].unsupported_models == {"claude-opus-4.7": rejected_at}
+
+    @pytest.mark.asyncio
+    async def test_model_rejection_cache_is_bounded(self, tmp_path):
+        manager = AccountManager(
+            credentials_file=str(tmp_path / "credentials.json"),
+            state_file=str(tmp_path / "state.json"),
+        )
+        manager._accounts = {"free": Account(id="free")}
+
+        base_time = time.time()
+        with patch(
+            "kiro.account_manager.time.time",
+            side_effect=[base_time + index for index in range(300)],
+        ):
+            for index in range(300):
+                await manager.report_failure(
+                    "free",
+                    f"invalid-model-{index}",
+                    ErrorType.RECOVERABLE,
+                    400,
+                    "INVALID_MODEL_ID",
+                )
+
+        rejected = manager._accounts["free"].unsupported_models
+        assert len(rejected) == 256
+        assert "invalid-model-0" not in rejected
+        assert "invalid-model-299" in rejected
+
+        await manager._save_state()
+        persisted = json.loads((tmp_path / "state.json").read_text())
+        assert len(persisted["accounts"]["free"]["unsupported_models"]) == 256
 
 
 class TestAccountManagerSaveState:
