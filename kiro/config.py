@@ -245,10 +245,8 @@ HIDDEN_MODELS: Dict[str, str] = {
 #       "gpt-5": "claude-sonnet-4.5"
 #   }
 #
-# Default: {"auto-kiro": "auto"} to avoid Cursor IDE conflict
-MODEL_ALIASES: Dict[str, str] = {
-    "auto-kiro": "auto",  # Default alias to avoid Cursor's "auto" model conflict
-}
+# No default aliases: every advertised model must pass a live account probe.
+MODEL_ALIASES: Dict[str, str] = {}
 
 # Models to hide from /v1/models endpoint.
 # These models still work when requested directly, but are not shown in the model list.
@@ -259,8 +257,7 @@ MODEL_ALIASES: Dict[str, str] = {
 # Example:
 #   HIDDEN_FROM_LIST = ["auto", "claude-old-model"]
 #
-# Default: ["auto"] to show only "auto-kiro" alias
-HIDDEN_FROM_LIST: List[str] = ["auto"]
+HIDDEN_FROM_LIST: List[str] = []
 
 # ==================================================================================================
 # Fallback Models Configuration (DNS Failure Recovery)
@@ -274,14 +271,19 @@ HIDDEN_FROM_LIST: List[str] = ["auto"]
 # - New models released after this version won't appear here
 # - Update gateway regularly to get the latest model list
 FALLBACK_MODELS: List[Dict[str, str]] = [
-    {"modelId": "auto"},
-    {"modelId": "claude-sonnet-4"},
-    {"modelId": "claude-sonnet-4.5"},
-    {"modelId": "claude-sonnet-4.6"},
     {"modelId": "claude-haiku-4.5"},
     {"modelId": "claude-opus-4.5"},
     {"modelId": "claude-opus-4.6"},
     {"modelId": "claude-opus-4.7"},
+    {"modelId": "claude-opus-4.8"},
+    {"modelId": "claude-opus-5"},
+    {"modelId": "claude-sonnet-4"},
+    {"modelId": "claude-sonnet-4.5"},
+    {"modelId": "claude-sonnet-4.6"},
+    {"modelId": "claude-sonnet-5"},
+    {"modelId": "gpt-5.6-sol"},
+    {"modelId": "gpt-5.6-terra"},
+    {"modelId": "gpt-5.6-luna"},
     {"modelId": "deepseek-3.2"},
     {"modelId": "glm-5"},
     {"modelId": "minimax-m2.1"},

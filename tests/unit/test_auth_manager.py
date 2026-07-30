@@ -7,6 +7,7 @@ Tests token management logic for Kiro without real network requests.
 
 import asyncio
 import json
+import sqlite3
 import pytest
 from datetime import datetime, timezone, timedelta
 from unittest.mock import AsyncMock, Mock, patch
@@ -628,6 +629,37 @@ class TestKiroAuthManagerAwsSsoCredentialsFile:
 
 class TestKiroAuthManagerSqliteCredentials:
     """Tests for loading credentials from SQLite database (kiro-cli format)."""
+
+    def test_social_token_ignores_stale_oidc_registration(self, tmp_path):
+        db = tmp_path / "mixed.sqlite3"
+        with sqlite3.connect(db) as conn:
+            conn.execute("CREATE TABLE auth_kv (key TEXT PRIMARY KEY, value TEXT)")
+            conn.executemany(
+                "INSERT INTO auth_kv VALUES (?, ?)",
+                [
+                    (
+                        "kirocli:social:token",
+                        json.dumps(
+                            {
+                                "access_token": "social_access",
+                                "refresh_token": "social_refresh",
+                            }
+                        ),
+                    ),
+                    (
+                        "kirocli:odic:device-registration",
+                        json.dumps(
+                            {"client_id": "stale", "client_secret": "stale"}
+                        ),
+                    ),
+                ],
+            )
+
+        manager = KiroAuthManager(sqlite_db=str(db))
+
+        assert manager.auth_type == AuthType.KIRO_DESKTOP
+        assert manager._client_id is None
+        assert manager._client_secret is None
     
     def test_load_credentials_from_sqlite_success(self, temp_sqlite_db):
         """

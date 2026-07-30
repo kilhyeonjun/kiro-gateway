@@ -329,7 +329,10 @@ class KiroAuthManager:
                     logger.debug(f"Loaded device registration from SQLite key: {key}")
                     break
             
-            if registration_row:
+            if (
+                registration_row
+                and self._sqlite_token_key != "kirocli:social:token"
+            ):
                 registration_data = json.loads(registration_row[0])
                 if registration_data:
                     if 'client_id' in registration_data:
