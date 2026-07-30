@@ -157,6 +157,19 @@ async def get_models(request: Request):
     return ModelList(data=openai_models)
 
 
+@router.get("/v1/models/{model_id}", response_model=OpenAIModel, dependencies=[Depends(verify_api_key)])
+async def get_model(request: Request, model_id: str):
+    """Return single model if available, 404 otherwise."""
+    if request.app.state.account_system:
+        available = request.app.state.account_manager.get_all_available_models()
+    else:
+        account = request.app.state.account_manager.get_first_account()
+        available = account.model_resolver.get_available_models()
+    if model_id not in available:
+        raise HTTPException(status_code=404, detail={"error": {"message": f"Model '{model_id}' not found", "type": "invalid_request_error"}})
+    return OpenAIModel(id=model_id, owned_by="anthropic", description="Claude model via Kiro API")
+
+
 @router.post("/v1/chat/completions", dependencies=[Depends(verify_api_key)])
 async def chat_completions(request: Request, request_data: ChatCompletionRequest):
     """
